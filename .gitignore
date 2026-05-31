@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Dataset (too large for git)
+PlantVillage-Dataset-master/
+
+# Large zip files
+*.zip
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old outputs
+tomato_output2/
+
+# Large model files (use Git LFS or external hosting for these)
+# We include tomato_output/models but exclude large individual .joblib via LFS rules
+# The rest of tomato_output is excluded:
+tomato_output/
+!tomato_output/models/
+!tomato_output/models/model_config.json
+!tomato_output/models/*.npy
+!tomato_output/models/*.joblib
+# NOTE: best_model.joblib is 210MB — handled by Git LFS
+# git lfs track "tomato_output/models/*.joblib"
+
+# Temp scripts
+save_scaler.py
+build_nb.py
+fix_sample.py
+regen_sample.py
+edit_nb.py
+tomato_local_clean.py
+tomato_local_fast.py
