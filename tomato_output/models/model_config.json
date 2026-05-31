@@ -1,0 +1,21 @@
+{
+  "overall_best": "Voting (soft)",
+  "f1": 0.9058,
+  "best_base_model": "SVM + Combined",
+  "img_size": [
+    128,
+    128
+  ],
+  "hog_orient": 9,
+  "hog_ppc": [
+    8,
+    8
+  ],
+  "hog_cpb": [
+    2,
+    2
+  ],
+  "orb_n": 300,
+  "bovw_vocab": 500,
+  "n_cv_folds": 5
+}
