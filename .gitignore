@@ -35,11 +35,9 @@ tomato_output2/
 # Large model files (use Git LFS or external hosting for these)
 # We include tomato_output/models but exclude large individual .joblib via LFS rules
 # The rest of tomato_output is excluded:
-tomato_output/
+tomato_output/*
 !tomato_output/models/
-!tomato_output/models/model_config.json
-!tomato_output/models/*.npy
-!tomato_output/models/*.joblib
+!tomato_output/models/*
 # NOTE: best_model.joblib is 210MB — handled by Git LFS
 # git lfs track "tomato_output/models/*.joblib"
 
