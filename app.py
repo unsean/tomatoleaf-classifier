@@ -23,46 +23,59 @@ def load_artifacts():
     scaler = joblib.load(MODELS_DIR / 'scaler_combined.joblib')
     return model, codebook, idf_weights, le, scaler, config
 
-def validate_leaf(img_bgr, min_plant_ratio=0.06, min_edge_ratio=0.03, min_blob_ratio=0.02):
+def validate_leaf(img_bgr, min_plant_ratio=0.06, min_blob_ratio=0.02, min_texture_ratio=0.008):
     """
     Cek apakah gambar kemungkinan daun.
-    Pakai 2 cek tanpa training:
-    1. Color + Shape: warna tanaman harus membentuk 1 blob besar (bukan pixel tersebar)
-    2. Edge: cek density edge (urat daun bikin banyak garis)
+    Syarat ketat: blob tanaman BESAR + tekstur (edge ORB keypoint) DI DALAM blob.
+    Dinding hijau = blob gede tapi halus -> ditolak.
     """
     h, w = img_bgr.shape[:2]
 
-    # --- Cek 1a: Warna tanaman (hijau + kuning + coklat) ---
+    # --- 1. Warna tanaman ---
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-
-    # Range presisi: 25-90 hue (exclude cyan/blue muda), S & V minimal 30 (gak pucat/gelap)
-    hijau_bawah  = np.array([25, 30, 30])
-    hijau_atas   = np.array([90, 255, 255])
+    hijau_bawah = np.array([25, 30, 30])
+    hijau_atas  = np.array([90, 255, 255])
     mask_tanaman = cv2.inRange(hsv, hijau_bawah, hijau_atas)
     ratio_tanaman = np.count_nonzero(mask_tanaman) / (h * w)
 
-    # --- Cek 1b: Connected Component (blob check) ---
-    # Daun = 1 objek besar, bukan pixel hijau yang tersebar (kayak rumput/baju)
+    # --- 2. Blob terbesar ---
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_tanaman, connectivity=8)
     if num_labels > 1:
-        areas = stats[1:, cv2.CC_STAT_AREA]  # exclude background (index 0)
-        largest_blob = np.max(areas)
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        largest_idx = 1 + np.argmax(areas)
+        largest_blob = areas[np.argmax(areas)]
     else:
+        largest_idx = 0
         largest_blob = 0
     ratio_blob = largest_blob / (h * w)
-    blob_ok = ratio_blob >= min_blob_ratio
 
-    # --- Cek 2: Edge density (Canny) ---
+    if largest_idx == 0:
+        return False, "Bukan daun terdeteksi. Pastikan gambar adalah daun tomat."
+
+    blob_mask = (labels == largest_idx).astype(np.uint8)
+
+    # --- 3. Edge density DI DALAM blob ---
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blur, 50, 150)
-    ratio_edge = np.count_nonzero(edges) / (h * w)
+    edge_in_blob = np.count_nonzero(edges & blob_mask)
+    texture_ratio = edge_in_blob / max(1, largest_blob)
 
-    # Decision: butuh cukup warna tanaman + blob besar ATAU cukup edge
-    color_ok = ratio_tanaman >= min_plant_ratio and blob_ok
-    edge_ok = ratio_edge >= min_edge_ratio
+    # --- 4. ORB keypoints DI DALAM blob ---
+    # Daun punya banyak sudut/corner (urat, tepi). Furniture halus = sedikit.
+    orb = cv2.ORB_create(nfeatures=500, fastThreshold=15)
+    kpts, _ = orb.detectAndCompute(gray, mask=blob_mask)
+    kp_count = len(kpts) if kpts else 0
+    kp_ratio = kp_count / max(1, largest_blob)
 
-    if not color_ok and not edge_ok:
+    # --- Decision ---
+    color_ok = ratio_tanaman >= min_plant_ratio and ratio_blob >= min_blob_ratio
+    # Texture: harus BOTH edge + ORB (wall = edge tipis & ORB sedikit, daun = keduanya tinggi)
+    edge_ok = texture_ratio >= min_texture_ratio
+    orb_ok = kp_ratio >= 0.001
+    texture_ok = edge_ok and orb_ok
+
+    if not color_ok or not texture_ok:
         return False, "Bukan daun terdeteksi. Pastikan gambar adalah daun tomat."
     return True, None
 
