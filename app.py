@@ -23,6 +23,49 @@ def load_artifacts():
     scaler = joblib.load(MODELS_DIR / 'scaler_combined.joblib')
     return model, codebook, idf_weights, le, scaler, config
 
+def validate_leaf(img_bgr, min_plant_ratio=0.06, min_edge_ratio=0.03, min_blob_ratio=0.02):
+    """
+    Cek apakah gambar kemungkinan daun.
+    Pakai 2 cek tanpa training:
+    1. Color + Shape: warna tanaman harus membentuk 1 blob besar (bukan pixel tersebar)
+    2. Edge: cek density edge (urat daun bikin banyak garis)
+    """
+    h, w = img_bgr.shape[:2]
+
+    # --- Cek 1a: Warna tanaman (hijau + kuning + coklat) ---
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+
+    # Range presisi: 25-90 hue (exclude cyan/blue muda), S & V minimal 30 (gak pucat/gelap)
+    hijau_bawah  = np.array([25, 30, 30])
+    hijau_atas   = np.array([90, 255, 255])
+    mask_tanaman = cv2.inRange(hsv, hijau_bawah, hijau_atas)
+    ratio_tanaman = np.count_nonzero(mask_tanaman) / (h * w)
+
+    # --- Cek 1b: Connected Component (blob check) ---
+    # Daun = 1 objek besar, bukan pixel hijau yang tersebar (kayak rumput/baju)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_tanaman, connectivity=8)
+    if num_labels > 1:
+        areas = stats[1:, cv2.CC_STAT_AREA]  # exclude background (index 0)
+        largest_blob = np.max(areas)
+    else:
+        largest_blob = 0
+    ratio_blob = largest_blob / (h * w)
+    blob_ok = ratio_blob >= min_blob_ratio
+
+    # --- Cek 2: Edge density (Canny) ---
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 50, 150)
+    ratio_edge = np.count_nonzero(edges) / (h * w)
+
+    # Decision: butuh cukup warna tanaman + blob besar ATAU cukup edge
+    color_ok = ratio_tanaman >= min_plant_ratio and blob_ok
+    edge_ok = ratio_edge >= min_edge_ratio
+
+    if not color_ok and not edge_ok:
+        return False, "Bukan daun terdeteksi. Pastikan gambar adalah daun tomat."
+    return True, None
+
 def preprocess_image(img_bgr, img_size):
     resized = cv2.resize(img_bgr, tuple(img_size))
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
@@ -142,6 +185,11 @@ def render_diagnostic_lab():
         st.success("Model loaded: Voting (soft) (F1 = 0.9058)")
         st.image(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB), caption="Leaf Image", use_container_width=True)
     with col2:
+        is_leaf, err_msg = validate_leaf(img_bgr)
+        if not is_leaf:
+            st.subheader("Prediction")
+            st.error(err_msg)
+            return
         with st.spinner("Classifying..."):
             label, probs, classes = predict(img_bgr, model, codebook, idf_weights, le, scaler, config)
         st.subheader("Prediction")
