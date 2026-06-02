@@ -1,0 +1,4 @@
+Model,Accuracy,Precision,Recall,F1-Score
+Voting (soft),0.9067,0.9066,0.9067,0.9058
+Stacking,0.8983,0.8979,0.8983,0.8979
+SVM + Combined,0.8983,0.8976,0.8983,0.8975

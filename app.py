@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import joblib
 import json
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
 from pathlib import Path
@@ -16,12 +17,17 @@ CONFIG_PATH = MODELS_DIR / 'model_config.json'
 def load_artifacts():
     with open(CONFIG_PATH, 'r') as f:
         config = json.load(f)
-    model = joblib.load(MODELS_DIR / 'best_model.joblib')
+    voting_model = joblib.load(MODELS_DIR / 'best_model.joblib')
+    svm_model = joblib.load(MODELS_DIR / 'svm_combined.joblib')
     codebook = joblib.load(MODELS_DIR / 'orb_codebook.joblib')
     idf_weights = np.load(MODELS_DIR / 'idf_weights.npy')
     le = joblib.load(MODELS_DIR / 'label_encoder.joblib')
     scaler = joblib.load(MODELS_DIR / 'scaler_combined.joblib')
-    return model, codebook, idf_weights, le, scaler, config
+    models = {
+        'Voting (soft)': voting_model,
+        'SVM + Combined': svm_model,
+    }
+    return models, codebook, idf_weights, le, scaler, config
 
 def validate_leaf(img_bgr, min_plant_ratio=0.06, min_blob_ratio=0.02, min_texture_ratio=0.008):
     """
@@ -109,15 +115,16 @@ def extract_bovw_tfidf(gray_norm, codebook, idf_weights, orb_n):
     norm = np.linalg.norm(tfidf)
     return tfidf / norm if norm > 0 else tfidf
 
-def predict(img_bgr, model, codebook, idf_weights, le, scaler, config):
+def predict(img_bgr, model, codebook, idf_weights, le, scaler, config, use_external_scaler=True):
     img_size = config['img_size']
     gray_norm, gray_clahe = preprocess_image(img_bgr, img_size)
     h = extract_hog_feat(gray_clahe, config)
     o = extract_bovw_tfidf(gray_norm, codebook, idf_weights, config['orb_n'])
     combined = np.concatenate([h, o]).reshape(1, -1)
-    combined_scaled = scaler.transform(combined)
-    pred_idx = model.predict(combined_scaled)[0]
-    probs = model.predict_proba(combined_scaled)[0]
+    if use_external_scaler:
+        combined = scaler.transform(combined)
+    pred_idx = model.predict(combined)[0]
+    probs = model.predict_proba(combined)[0]
     label = le.inverse_transform([pred_idx])[0]
     return label, probs, le.classes_
 
@@ -174,11 +181,17 @@ def draw_donut(pct, color, size=3.5):
     return fig
 
 try:
-    model, codebook, idf_weights, le, scaler, config = load_artifacts()
-    st.success(f"Model loaded: **{config['overall_best']}** (F1 = {config['f1']:.4f})")
+    models, codebook, idf_weights, le, scaler, config = load_artifacts()
 except Exception as e:
     st.error(f"Error loading model: {e}")
     st.stop()
+
+_fc = pd.read_csv(Path('tomato_output/reports/results/final_comparison.csv'))
+MODEL_F1 = dict(zip(_fc['Model'], _fc['F1-Score']))
+
+selected_model_name = st.selectbox("Select model", list(models.keys()))
+active_model = models[selected_model_name]
+st.success(f"Model loaded: **{selected_model_name}** (F1 = {MODEL_F1.get(selected_model_name, 0):.4f})")
 
 
 def render_diagnostic_lab():
@@ -195,7 +208,7 @@ def render_diagnostic_lab():
     col1, col2 = st.columns([1, 1.5])
     with col1:
         st.subheader("Image")
-        st.success("Model loaded: Voting (soft) (F1 = 0.9058)")
+        st.success(f"Model: {selected_model_name}")
         st.image(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB), caption="Leaf Image", use_container_width=True)
     with col2:
         is_leaf, err_msg = validate_leaf(img_bgr)
@@ -204,7 +217,8 @@ def render_diagnostic_lab():
             st.error(err_msg)
             return
         with st.spinner("Classifying..."):
-            label, probs, classes = predict(img_bgr, model, codebook, idf_weights, le, scaler, config)
+            needs_scaler = selected_model_name == 'Voting (soft)'
+            label, probs, classes = predict(img_bgr, active_model, codebook, idf_weights, le, scaler, config, use_external_scaler=needs_scaler)
         st.subheader("Prediction")
         color = CLASS_COLORS.get(label, "#ffffff")
         st.markdown(
@@ -232,6 +246,6 @@ def render_diagnostic_lab():
             plt.close(fig)
 
     st.divider()
-    st.caption(f"Model: {config['overall_best']} | Features: HOG ({config['hog_orient']} orient) + ORB‑TFIDF ({config['bovw_vocab']} words)")
+    st.caption(f"Model: {selected_model_name} | Features: HOG ({config['hog_orient']} orient) + ORB-TFIDF ({config['bovw_vocab']} words)")
 
 render_diagnostic_lab()
