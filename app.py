@@ -24,8 +24,8 @@ def load_artifacts():
     le = joblib.load(MODELS_DIR / 'label_encoder.joblib')
     scaler = joblib.load(MODELS_DIR / 'scaler_combined.joblib')
     models = {
-        'Voting (soft)': voting_model,
         'SVM + Combined': svm_model,
+        'Voting (soft)': voting_model,
     }
     return models, codebook, idf_weights, le, scaler, config
 
